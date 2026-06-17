@@ -1,0 +1,91 @@
+{
+  "name": "svelte-reactive-underlines",
+  "displayName": "Svelte Reactive Underlines",
+  "description": "Underline Svelte 5 reactive variables and functions throughout a workspace.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dylansc22/svelte-reactive-underlines.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dylansc22/svelte-reactive-underlines/issues"
+  },
+  "homepage": "https://github.com/dylansc22/svelte-reactive-underlines#readme",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:svelte",
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "svelteReactiveUnderlines.rescanWorkspace",
+        "title": "Svelte Reactive Underlines: Rescan Workspace"
+      },
+      {
+        "command": "svelteReactiveUnderlines.showStatus",
+        "title": "Svelte Reactive Underlines: Show Status"
+      }
+    ],
+    "configuration": {
+      "title": "Svelte Reactive Underlines",
+      "properties": {
+        "svelteReactiveUnderlines.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable underlines for Svelte 5 reactive variables and functions."
+        },
+        "svelteReactiveUnderlines.callerPropagation": {
+          "type": "string",
+          "enum": [
+            "off",
+            "oneHop",
+            "transitive"
+          ],
+          "default": "off",
+          "description": "Controls whether functions that only call reactive functions are also marked reactive. Off marks only functions that directly read reactive variables."
+        },
+        "svelteReactiveUnderlines.maxFiles": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 100,
+          "description": "Maximum number of workspace files to index."
+        },
+        "svelteReactiveUnderlines.variableUnderlineColor": {
+          "type": "string",
+          "default": "rgba(255, 193, 7, 0.95)",
+          "description": "CSS color used for reactive variable underlines."
+        },
+        "svelteReactiveUnderlines.functionUnderlineColor": {
+          "type": "string",
+          "default": "rgba(64, 196, 255, 0.95)",
+          "description": "CSS color used for reactive function underlines."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "rm -rf dist && tsc -p ./ --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
+    "watch": "tsc -watch -p ./ --noEmit",
+    "check": "tsc -p ./ --noEmit",
+    "package": "npm run compile && vsce package --no-dependencies --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {}
+}
