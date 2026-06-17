@@ -2,6 +2,10 @@
 
 VS Code extension that underlines Svelte 5 reactive variables and functions.
 
+## Preview
+
+![Svelte Reactive Underlines demo](docs/svelte-reactive-underlines-demo.png)
+
 ## Install
 
 Download the latest `.vsix` from the GitHub Releases page, then install it:
