@@ -27,6 +27,12 @@ export interface FunctionInfo {
   functionCalls: Set<string>;
 }
 
+export interface ImportBinding {
+  localName: string;
+  importedName: string;
+  source: string;
+}
+
 export interface DocumentAnalysis {
   uri: vscode.Uri;
   path: string;
@@ -34,6 +40,7 @@ export interface DocumentAnalysis {
   isSvelte: boolean;
   reactiveVariables: Set<string>;
   functions: Map<string, FunctionInfo>;
+  imports: ImportBinding[];
   identifiers: IdentifierRange[];
   markupExpressionRanges: OffsetRange[];
 }
@@ -41,6 +48,8 @@ export interface DocumentAnalysis {
 export interface WorkspaceAnalysis {
   reactiveVariablesByFile: Map<string, Set<string>>;
   reactiveFunctionsByFile: Map<string, Set<string>>;
+  reactiveVariableReferencesByFile: Map<string, Set<string>>;
+  reactiveFunctionReferencesByFile: Map<string, Set<string>>;
   documents: Map<string, DocumentAnalysis>;
 }
 

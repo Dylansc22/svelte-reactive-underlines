@@ -7,6 +7,7 @@ import {
   DecorationRanges,
   DocumentAnalysis,
   FunctionInfo,
+  ImportBinding,
   IdentifierRange,
   OffsetRange,
   WorkspaceAnalysis
@@ -39,6 +40,7 @@ export function analyzeText(uri: vscode.Uri, text: string): DocumentAnalysis {
   const reactiveVariables = new Set<string>();
   const identifiers: IdentifierRange[] = [];
   const functions = new Map<string, FunctionInfo>();
+  const imports = collectImports(sourceFile);
 
   collectReactiveVariables(sourceFile, reactiveVariables);
   collectIdentifiers(sourceFile, identifiers);
@@ -55,6 +57,7 @@ export function analyzeText(uri: vscode.Uri, text: string): DocumentAnalysis {
     isSvelte,
     reactiveVariables,
     functions,
+    imports,
     identifiers,
     markupExpressionRanges: virtual?.markupExpressionRanges ?? []
   };
@@ -66,10 +69,14 @@ export function buildWorkspaceAnalysis(
 ): WorkspaceAnalysis {
   const reactiveVariablesByFile = new Map<string, Set<string>>();
   const reactiveFunctionsByFile = new Map<string, Set<string>>();
+  const documentsByPath = new Map(documents.map((document) => [document.path, document]));
+  const reactiveVariableReferencesByFile = new Map<string, Set<string>>();
+  const reactiveFunctionReferencesByFile = new Map<string, Set<string>>();
 
   for (const document of documents) {
     reactiveVariablesByFile.set(document.path, document.reactiveVariables);
     reactiveFunctionsByFile.set(document.path, new Set());
+    reactiveVariableReferencesByFile.set(document.path, new Set(document.reactiveVariables));
 
     for (const fn of document.functions.values()) {
       if (fn.directReactiveReads.size > 0) {
@@ -78,13 +85,27 @@ export function buildWorkspaceAnalysis(
     }
   }
 
+  for (const document of documents) {
+    addImportedReactiveNames(document, documentsByPath, reactiveVariablesByFile, reactiveVariableReferencesByFile);
+  }
+
   if (callerPropagation !== 'off') {
-    propagateReactiveFunctions(documents, reactiveFunctionsByFile, callerPropagation);
+    propagateReactiveFunctions(documents, documentsByPath, reactiveFunctionsByFile, callerPropagation);
+  }
+
+  for (const document of documents) {
+    reactiveFunctionReferencesByFile.set(
+      document.path,
+      new Set(reactiveFunctionsByFile.get(document.path) ?? [])
+    );
+    addImportedReactiveNames(document, documentsByPath, reactiveFunctionsByFile, reactiveFunctionReferencesByFile);
   }
 
   return {
     reactiveVariablesByFile,
     reactiveFunctionsByFile,
+    reactiveVariableReferencesByFile,
+    reactiveFunctionReferencesByFile,
     documents: new Map(documents.map((document) => [document.uri.toString(), document]))
   };
 }
@@ -98,19 +119,18 @@ export function getDecorationRanges(
     return { variables: [], functions: [] };
   }
 
-  const localReactiveVariables = analysis.reactiveVariablesByFile.get(analyzedDocument.path) ?? new Set();
-  const globalReactiveVariables = unionSets(analysis.reactiveVariablesByFile.values());
-  const globalReactiveFunctions = unionSets(analysis.reactiveFunctionsByFile.values());
+  const reactiveVariables = analysis.reactiveVariableReferencesByFile.get(analyzedDocument.path) ?? new Set();
+  const reactiveFunctions = analysis.reactiveFunctionReferencesByFile.get(analyzedDocument.path) ?? new Set();
   const variables: vscode.Range[] = [];
   const functions: vscode.Range[] = [];
 
   for (const identifier of analyzedDocument.identifiers) {
-    if (localReactiveVariables.has(identifier.name) || globalReactiveVariables.has(identifier.name)) {
+    if (reactiveVariables.has(identifier.name)) {
       variables.push(toVsCodeRange(document, identifier));
       continue;
     }
 
-    if (globalReactiveFunctions.has(identifier.name)) {
+    if (reactiveFunctions.has(identifier.name)) {
       functions.push(toVsCodeRange(document, identifier));
     }
   }
@@ -142,6 +162,39 @@ function collectReactiveVariables(sourceFile: ts.SourceFile, reactiveVariables: 
   };
 
   visit(sourceFile);
+}
+
+function collectImports(sourceFile: ts.SourceFile): ImportBinding[] {
+  const imports: ImportBinding[] = [];
+
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
+      continue;
+    }
+
+    const source = statement.moduleSpecifier.text;
+    const clause = statement.importClause;
+    if (!clause) {
+      continue;
+    }
+
+    if (clause.name) {
+      imports.push({ localName: clause.name.text, importedName: 'default', source });
+    }
+
+    const namedBindings = clause.namedBindings;
+    if (namedBindings && ts.isNamedImports(namedBindings)) {
+      for (const element of namedBindings.elements) {
+        imports.push({
+          localName: element.name.text,
+          importedName: element.propertyName?.text ?? element.name.text,
+          source
+        });
+      }
+    }
+  }
+
+  return imports;
 }
 
 function collectIdentifiers(sourceFile: ts.SourceFile, identifiers: IdentifierRange[]) {
@@ -401,23 +454,25 @@ function isFunctionLike(node: ts.Node): node is ts.FunctionLikeDeclaration {
 
 function propagateReactiveFunctions(
   documents: DocumentAnalysis[],
+  documentsByPath: Map<string, DocumentAnalysis>,
   reactiveFunctionsByFile: Map<string, Set<string>>,
   callerPropagation: CallerPropagation
 ) {
   const maxIterations = callerPropagation === 'oneHop' ? 1 : 20;
 
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
-    const reactiveFunctionNames = unionSets(reactiveFunctionsByFile.values());
     let changed = false;
 
     for (const document of documents) {
       const reactiveFunctions = reactiveFunctionsByFile.get(document.path);
       if (!reactiveFunctions) continue;
+      const callableReactiveFunctions = new Set(reactiveFunctions);
+      addImportedReactiveNames(document, documentsByPath, reactiveFunctionsByFile, new Map([[document.path, callableReactiveFunctions]]));
 
       for (const fn of document.functions.values()) {
         if (reactiveFunctions.has(fn.name)) continue;
 
-        if (intersects(fn.functionCalls, reactiveFunctionNames)) {
+        if (intersects(fn.functionCalls, callableReactiveFunctions)) {
           reactiveFunctions.add(fn.name);
           changed = true;
         }
@@ -428,6 +483,56 @@ function propagateReactiveFunctions(
       return;
     }
   }
+}
+
+function addImportedReactiveNames(
+  document: DocumentAnalysis,
+  documentsByPath: Map<string, DocumentAnalysis>,
+  sourceNamesByFile: Map<string, Set<string>>,
+  targetNamesByFile: Map<string, Set<string>>
+) {
+  const targetNames = targetNamesByFile.get(document.path);
+  if (!targetNames) {
+    return;
+  }
+
+  for (const binding of document.imports) {
+    const importedDocument = resolveImport(document.path, binding.source, documentsByPath);
+    if (!importedDocument) {
+      continue;
+    }
+
+    const sourceNames = sourceNamesByFile.get(importedDocument.path);
+    if (sourceNames?.has(binding.importedName)) {
+      targetNames.add(binding.localName);
+    }
+  }
+}
+
+function resolveImport(
+  importingPath: string,
+  source: string,
+  documentsByPath: Map<string, DocumentAnalysis>
+): DocumentAnalysis | undefined {
+  if (!source.startsWith('.')) {
+    return undefined;
+  }
+
+  const basePath = path.resolve(path.dirname(importingPath), source);
+  const candidates = [
+    basePath,
+    `${basePath}.ts`,
+    `${basePath}.js`,
+    `${basePath}.svelte.ts`,
+    `${basePath}.svelte.js`,
+    `${basePath}.svelte`,
+    path.join(basePath, 'index.ts'),
+    path.join(basePath, 'index.js'),
+    path.join(basePath, 'index.svelte.ts'),
+    path.join(basePath, 'index.svelte.js')
+  ];
+
+  return candidates.map((candidate) => documentsByPath.get(candidate)).find(Boolean);
 }
 
 function collectMarkupIdentifiers(
@@ -481,16 +586,6 @@ function isKeyword(word: string) {
 
 function toVsCodeRange(document: vscode.TextDocument, range: OffsetRange) {
   return new vscode.Range(document.positionAt(range.start), document.positionAt(range.end));
-}
-
-function unionSets(sets: Iterable<Set<string>>) {
-  const union = new Set<string>();
-  for (const set of sets) {
-    for (const item of set) {
-      union.add(item);
-    }
-  }
-  return union;
 }
 
 function intersects(left: Set<string>, right: Set<string>) {

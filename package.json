@@ -2,7 +2,7 @@
   "name": "svelte-reactive-underlines",
   "displayName": "Svelte Reactive Underlines",
   "description": "Underline Svelte 5 reactive variables and functions throughout a workspace.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "local",
   "license": "MIT",
   "repository": {

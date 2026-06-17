@@ -74,7 +74,7 @@ or:
 
 ## Prototype Limits
 
-This first version uses a fast workspace index and name-based references. That keeps it simple and useful immediately, but it can produce false positives when unrelated files reuse the same variable or function name.
+This version uses a fast workspace index and name-based references scoped to the current file plus explicit relative imports. That keeps it simple and useful immediately, but it is not a full TypeScript symbol graph yet.
 
 The production-grade version should move the reference layer to the TypeScript language service or Svelte language-tools so references are symbol-based instead of name-based.
 
